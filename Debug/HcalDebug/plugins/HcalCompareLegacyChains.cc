@@ -405,15 +405,13 @@ HcalCompareLegacyChains::analyze(const edm::Event& event, const edm::EventSetup&
    if (!PVs->empty() && !((*PVs)[0].isFake())) {//Offline Primary Vertices
      leadPV = math::XYZPoint((*PVs)[0].x(),(*PVs)[0].y(),(*PVs)[0].z());
    }
-   unsigned int n = 1;
-   unsigned int IPHI[n] = {0};
-   unsigned int DEPTH[n] = {0};
-   unsigned int IETA[n] = {0};
-   //unsigned int ieta[n] = {0.0};
-   //double Sum_Et[n] = {0.0};
-   //double SumPU_Et[n] = {0.0};
-   //double SumHS_Et[n] = {0.0};
-  
+   unsigned int n = 0;
+   //bool repetetive = false;
+   std::vector<unsigned int> Geometry;
+   std::vector<double> etaphi;
+   std::vector<double> PFRec_Et;
+   std::vector<double> array;
+
    //================ PFRecHits from PFCandidates->PFBlocks->PFClusters->PFRecHitFractions =============================================
    //Process:	1-Loop over all Charged Hadrons PFCandidates. const_iterator ci later pointed to pfc
    //		2-Return elements in blocks by calling the function elementsInBlocks() from the vector ElementsInBlocks. Vector ElementsInBlocks is defined from the pair ElementInBlock. These all are defined in PFCandidate.h (https://github.com/cms-sw/cmssw/blob/CMSSW_10_1_X/DataFormats/ParticleFlowCandidate/interface/PFCandidate.h#L386-L387)
@@ -421,19 +419,10 @@ HcalCompareLegacyChains::analyze(const edm::Event& event, const edm::EventSetup&
    //		4-Loop on the first element of ElementInBlock pair: "blockRef" that contains TRACK, PS1, PS2, ECAL, HCAL, GSF, BREM, SC HO (https://github.com/cms-sw/cmssw/blob/CMSSW_10_1_X/DataFormats/ParticleFlowReco/interface/PFBlockElement.h#L33-L48). Type number represents element ID such as TRACK, PS1, PS2 ...
    //		5-Extract the PFCluster from blockelements components
    //		6-Loop over Hits within the PFCluster
-   double PFSEt_T26 = 0;
-   double PFSEt_T26_D1 = 0;
-   double PFSEt_T26_D2 = 0;
-   double PFSEt_T26_D3 = 0;
-   double PFSEt_T26_D4 = 0;
-   double PFSEt_T26_D5 = 0;
-   double PFSEt_T26_D6 = 0;
-   double PFSEt_T26_D7 = 0;
-   unsigned int iphi = 0;
    edm::Handle<reco::PFCandidateCollection> pfCandidate;
    event.getByToken(inputTagPFCandidates_, pfCandidate);
-   std::ofstream myfile;//to get the result of the big file and make ntuples
-   myfile.open("tuple.txt");//write the results in a text file
+   //std::ofstream myfile;//to get the result of the big file and make ntuples
+   //myfile.open("tuple.txt");//write the results in a text file
    double posX,posY,posZ = 0;//Geometry Info.
    for( reco::PFCandidateCollection::const_iterator ci  = pfCandidate->begin(); ci!=pfCandidate->end(); ++ci)  { //PFCandidate Loop (1)
      const reco::PFCandidate& pfc = *ci;//(1)
@@ -446,10 +435,10 @@ HcalCompareLegacyChains::analyze(const edm::Event& event, const edm::EventSetup&
        //=== to cout the elements in the block:(https://github.com/cms-sw/cmssw/blob/CMSSW_10_1_X/RecoParticleFlow/Configuration/test/PFChargedHadronAnalyzer.cc#L188-L193) =========
        const PFCandidate::ElementsInBlocks& theElements = pfc.elementsInBlocks();
        const reco::PFBlockRef blockRef = theElements[0].first;// blockRef is the first object of the ElementInBlock pair (4)
-       const edm::OwnVector<reco::PFBlockElement>& elements = blockRef->elements();
-       for(unsigned iEle=0; iEle<elements.size(); iEle++) {//to give type of elements in blockRef: Track, PS1, PS2 ...
-         //std::cout<<"PFElementsInBlocks are: "<<elements[iEle].type()<<std::endl;
-       }
+       /*const edm::OwnVector<reco::PFBlockElement>& elements = blockRef->elements();
+       for(unsigned iEle=0; iEle<elements.size(); iEle++) {//to check type of elements in blockRef: Track, PS1, PS2 ...
+         std::cout<<"PFElementsInBlocks are: "<<elements[iEle].type()<<std::endl;
+       }*/
        //================================================
        const edm::OwnVector<reco::PFBlockElement>& PFBlockRef = Elements->first->elements();
        for ( edm::OwnVector<reco::PFBlockElement>::const_iterator blockComponent = PFBlockRef.begin(); blockComponent != PFBlockRef.end(); ++blockComponent ) {//Loop over block components such as Track, PS1, PS2 ... (4)
@@ -457,63 +446,76 @@ HcalCompareLegacyChains::analyze(const edm::Event& event, const edm::EventSetup&
            reco::PFClusterRef pfCluster = blockComponent->clusterRef();//get PFCluster from ECAL, HCAL, HO, HFEM, HFHAD (5)
    	   if (pfCluster->layer() == PFLayer::HCAL_ENDCAP){//HCAL ENDCAP
              const std::vector<reco::PFRecHitFraction>& pfRecHitFractions = pfCluster->recHitFractions();
-	     //bool repetetive = false;
+	     n = 0;
+
              for ( std::vector<reco::PFRecHitFraction>::const_iterator it = pfRecHitFractions.begin(); it != pfRecHitFractions.end(); ++it ) {//PFCluster Loop (6)
 	       bool repetetive = false;
-	       n ++;
+	       DetId idseed;//reference from: 	https://github.com/cms-sw/cmssw/blob/master/RecoParticleFlow/PFClusterTools/src/PFPhotonClusters.cc#L27
                const reco::PFRecHitRef& pfRecHits = it->recHitRef();
                posX = pfRecHits->position().x();
                posY = pfRecHits->position().y();
                posZ = pfRecHits->position().z();
+	       idseed = pfRecHits->detId();
                math::XYZPoint pflowPos(posX,posY,posZ);
                double Eta    = pflowPos.eta();
 	       double Phi    = pflowPos.phi();
+	       unsigned int iphi = 0;
+	       //double iphi = 0;
+	       HcalDetId HEidSeed = HcalDetId(idseed.rawId());
+	       iphi = HEidSeed.iphi();
+	       //ieta definition
 	       unsigned int ieta = 0;
-	       if(2.172<=fabs(Eta) && fabs(Eta)<=2.322){ieta = 26;}
-               if(2.043<=fabs(Eta) && fabs(Eta)<=2.172){ieta = 25;}
-               if(1.930<=fabs(Eta) && fabs(Eta)<=2.043){ieta = 24;}
-               if(1.830<=fabs(Eta) && fabs(Eta)<=1.930){ieta = 23;}
-               if(1.740<=fabs(Eta) && fabs(Eta)<=1.830){ieta = 22;}
-               if(1.653<=fabs(Eta) && fabs(Eta)<=1.740){ieta = 21;}
+	       //double ieta = 0;
+	       if(2.322<=fabs(Eta) && fabs(Eta)<=2.500){ieta = 26;}
+	       if(2.172<=fabs(Eta) && fabs(Eta)<=2.322){ieta = 25;}
+               if(2.043<=fabs(Eta) && fabs(Eta)<=2.172){ieta = 24;}
+               if(1.930<=fabs(Eta) && fabs(Eta)<=2.043){ieta = 23;}
+               if(1.830<=fabs(Eta) && fabs(Eta)<=1.930){ieta = 22;}
+               if(1.740<=fabs(Eta) && fabs(Eta)<=1.830){ieta = 21;}
+               if(1.653<=fabs(Eta) && fabs(Eta)<=1.740){ieta = 20;}
                if(1.566<=fabs(Eta) && fabs(Eta)<=1.653){ieta = 19;}
                if(1.479<=fabs(Eta) && fabs(Eta)<=1.566){ieta = 18;}
                if(1.392<=fabs(Eta) && fabs(Eta)<=1.479){ieta = 17;}
                if(1.305<=fabs(Eta) && fabs(Eta)<=1.392){ieta = 16;}
 
+	       double PFRecHit_Et = pfRecHits->energy()/cosh(Eta);
 	       unsigned int depth = pfRecHits->depth();// from depth =1 to depth =7
-	       if(Phi>=0){iphi = Phi*180/5/M_PI;}
-	       else{iphi = 72 + Phi*180/5/M_PI;}
-	       //if(1.3<fabs(Eta) && fabs(Eta)<=2.5){//Tracker Area
-	       if(2.322<=fabs(Eta) && fabs(Eta)<=2.500){//ieta == 26
-		 std::cout<<"depth is: "<<depth<<" iphi is: "<<iphi<<"  ieta:  "<<ieta<<"  repetation:   "<<repetetive<<std::endl;
-		 PFSEt_T26 +=pfRecHits->energy()/cosh(Eta);
-		 DEPTH[n] = depth;
-		 IPHI[n] = iphi;
-		 for(unsigned int i(0); i<n; i++){
-		   if(depth == DEPTH[i] && iphi == IPHI[i] && ieta == IETA[i]){repetetive = true;}
+	       //double depth = pfRecHits->depth();
+	       if(ieta<=26 && ieta>=16){
+		 Geometry.push_back(iphi);//(3*n)th element is iphi
+		 Geometry.push_back(ieta);//(3*n+1)th element is ieta
+		 Geometry.push_back(depth);//(3*n+2)th element is depth
+		 PFRec_Et.push_back(PFRecHit_Et);
+		 etaphi.push_back(Eta);//the (2*n)th element is eta 
+		 etaphi.push_back(Phi);//(2*n+1)th element is phi
+		 for(unsigned int i(0); repetetive == false && i<n; i++){
+                   if(iphi == Geometry[3*i] && ieta == Geometry[3*i+1] && depth == Geometry[3*i+2] && PFRecHit_Et == PFRec_Et[i] && Eta == etaphi[2*i] && Phi == etaphi[2*i+1]){
+		     repetetive = true;
+		     //std::cout<<"repetetive is true  "<<std::endl;
+		   }
+		   //else{std::cout<<"repetetive is false  "<<std::endl;}
 		 }
-
-		 std::cout<<n<<"        DEPTH[n]   "<<DEPTH[n]<<" IPHI[n]   "<<IPHI[n]<<"  ieta:  "<<IETA[n]<<"  repetetive:  "<<repetetive<<std::endl;
-		 if(repetetive == true) continue; 
-                 if(depth == 1){PFSEt_T26_D1 += pfRecHits->energy()/cosh(Eta);}
-                 if(depth == 2){PFSEt_T26_D2 += pfRecHits->energy()/cosh(Eta);}
-                 if(depth == 3){PFSEt_T26_D3 += pfRecHits->energy()/cosh(Eta);}
-                 if(depth == 4){PFSEt_T26_D4 += pfRecHits->energy()/cosh(Eta);}
-                 if(depth == 5){PFSEt_T26_D5 += pfRecHits->energy()/cosh(Eta);}
-                 if(depth == 6){PFSEt_T26_D6 += pfRecHits->energy()/cosh(Eta);}
-                 if(depth == 7){PFSEt_T26_D7 += pfRecHits->energy()/cosh(Eta);}
-		 std::cout<<"Depth1: "<<PFSEt_T26_D1<<"Depth2: "<<PFSEt_T26_D2<<"Depth3: "<<PFSEt_T26_D3<<"Depth4: "<<PFSEt_T26_D4<<"Depth5: "<<PFSEt_T26_D5<<"Depth6: "<<PFSEt_T26_D6<<"Depth7: "<<PFSEt_T26_D7<<std::endl;
-
-	       }//tower 26
-             }//End loop over PFCluster
+		 //std::cout<<"repetetive is  "<<repetetive<<std::endl;
+		 if(repetetive == true) {n = n-1;}
+		 if(repetetive == true) continue;
+		 if(depth == 1){PFRec_Et[7*n] += pfRecHits->energy()/cosh(Eta);}
+                 if(depth == 2){PFRec_Et[7*n+1] += pfRecHits->energy()/cosh(Eta);}
+                 if(depth == 3){PFRec_Et[7*n+2] += pfRecHits->energy()/cosh(Eta);}
+                 if(depth == 4){PFRec_Et[7*n+3] += pfRecHits->energy()/cosh(Eta);}
+                 if(depth == 5){PFRec_Et[7*n+4] += pfRecHits->energy()/cosh(Eta);}
+                 if(depth == 6){PFRec_Et[7*n+5] += pfRecHits->energy()/cosh(Eta);}
+                 if(depth == 7){PFRec_Et[7*n+6] += pfRecHits->energy()/cosh(Eta);}
+	       }
+	       n++;
+		//std::cout<<"loops of hits: "<<n<<std::endl;
+             }//End loop over PFRechits
+	     //std::cout<<"hits outside of loop: "<<n<<std::endl;
            }//Restrict HCAL ENDCAP
-           if(fabs(dz)<0.1){myfile<<0<<" "<<PFSEt_T26<<" "<<PFSEt_T26_D1<<" "<<PFSEt_T26_D2<<" "<<PFSEt_T26_D3<<" "<<PFSEt_T26_D4<<" "<<PFSEt_T26_D5<<" "<<PFSEt_T26_D6<<" "<<PFSEt_T26_D7<<std::endl;}//HS
-	   else{myfile<<1<<" "<<PFSEt_T26<<" "<<PFSEt_T26_D1<<" "<<PFSEt_T26_D2<<" "<<PFSEt_T26_D3<<" "<<PFSEt_T26_D4<<" "<<PFSEt_T26_D5<<" "<<PFSEt_T26_D6<<" "<<PFSEt_T26_D7<<std::endl;}//PU
          }//Pick PFClusters
        }  //Loop over PFBlockElements
+       //std::cout<<"PFBlockElements"<<std::endl;
      }  //Loop over PFBlock
    }  //Loop over PFCandidate
-   myfile.close();
    edm::ESHandle<HcalTrigTowerGeometry> tpd_geo_h;
    setup.get<CaloGeometryRecord>().get(tpd_geo_h);
    edm::ESHandle<HcalDbService> conditions;
